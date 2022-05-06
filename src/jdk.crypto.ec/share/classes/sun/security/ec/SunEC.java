@@ -22,10 +22,16 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+/*
+ * ===========================================================================
+ * (c) Copyright IBM Corp. 2022, 2022 All Rights Reserved
+ * ===========================================================================
+ */
 
 package sun.security.ec;
 
 import java.security.AccessController;
+import java.security.FIPSConfigurator;
 import java.security.InvalidParameterException;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivilegedAction;
@@ -55,6 +61,8 @@ import static sun.security.util.SecurityProviderConstants.*;
 public final class SunEC extends Provider {
 
     private static final long serialVersionUID = -2279741672933606418L;
+
+    private static boolean isFips = FIPSConfigurator.enableFips();
 
     private static class ProviderServiceA extends ProviderService {
         ProviderServiceA(Provider p, String type, String algo, String cn,
@@ -199,135 +207,185 @@ public final class SunEC extends Provider {
 
     void putEntries() {
         HashMap<String, String> ATTRS = new HashMap<>(3);
-        ATTRS.put("ImplementedIn", "Software");
-        String ecKeyClasses = "java.security.interfaces.ECPublicKey" +
-                 "|java.security.interfaces.ECPrivateKey";
-        ATTRS.put("SupportedKeyClasses", ecKeyClasses);
-        ATTRS.put("KeySize", "256");
+        if (isFips) {
+            ATTRS.put("ImplementedIn", "Software");
+            String ecKeyClasses = "java.security.interfaces.ECPublicKey" +
+                     "|java.security.interfaces.ECPrivateKey";
+            ATTRS.put("SupportedKeyClasses", ecKeyClasses);
+            ATTRS.put("KeySize", "256");
 
-        /*
-         *  Key Factory engine
-         */
-        putService(new ProviderService(this, "KeyFactory",
-            "EC", "sun.security.ec.ECKeyFactory",
-            List.of("EllipticCurve"), ATTRS));
+            /*
+             *  Key Factory engine
+             */
+            putService(new ProviderService(this, "KeyFactory",
+                "EC", "sun.security.ec.ECKeyFactory",
+                List.of("EllipticCurve"), ATTRS));
 
-        /*
-         * Algorithm Parameter engine
-         */
-        // "AlgorithmParameters.EC SupportedCurves" prop used by unit test
-        boolean firstCurve = true;
-        StringBuilder names = new StringBuilder();
+            /*
+             * Algorithm Parameter engine
+             */
+            // "AlgorithmParameters.EC SupportedCurves" prop used by unit test
+            boolean firstCurve = true;
+            StringBuilder names = new StringBuilder();
 
-        for (NamedCurve namedCurve :
-            List.of(
-                CurveDB.lookup("secp256r1"),
-                CurveDB.lookup("secp384r1"),
-                CurveDB.lookup("secp521r1"))) {
-            if (!firstCurve) {
-                names.append("|");
-            } else {
-                firstCurve = false;
+            for (NamedCurve namedCurve :
+                List.of(
+                    CurveDB.lookup("secp256r1"),
+                    CurveDB.lookup("secp384r1"),
+                    CurveDB.lookup("secp521r1"))) {
+                if (!firstCurve) {
+                    names.append("|");
+                } else {
+                    firstCurve = false;
+                }
+
+                names.append("[");
+                String[] commonNames = namedCurve.getNameAndAliases();
+                for (String commonName : commonNames) {
+                    names.append(commonName);
+                    names.append(",");
+                }
+
+                names.append(namedCurve.getObjectId());
+                names.append("]");
             }
 
-            names.append("[");
-            String[] commonNames = namedCurve.getNameAndAliases();
-            for (String commonName : commonNames) {
-                names.append(commonName);
-                names.append(",");
+            HashMap<String, String> apAttrs = new HashMap<>(ATTRS);
+            apAttrs.put("SupportedCurves", names.toString());
+
+            putService(new ProviderServiceA(this, "AlgorithmParameters",
+                "EC", "sun.security.util.ECParameters", apAttrs));
+        } else {
+            ATTRS.put("ImplementedIn", "Software");
+            String ecKeyClasses = "java.security.interfaces.ECPublicKey" +
+                    "|java.security.interfaces.ECPrivateKey";
+            ATTRS.put("SupportedKeyClasses", ecKeyClasses);
+            ATTRS.put("KeySize", "256");
+
+            /*
+            *  Key Factory engine
+            */
+            putService(new ProviderService(this, "KeyFactory",
+                "EC", "sun.security.ec.ECKeyFactory",
+                List.of("EllipticCurve"), ATTRS));
+
+            /*
+            * Algorithm Parameter engine
+            */
+            // "AlgorithmParameters.EC SupportedCurves" prop used by unit test
+            boolean firstCurve = true;
+            StringBuilder names = new StringBuilder();
+
+            for (NamedCurve namedCurve :
+                List.of(
+                    CurveDB.lookup("secp256r1"),
+                    CurveDB.lookup("secp384r1"),
+                    CurveDB.lookup("secp521r1"))) {
+                if (!firstCurve) {
+                    names.append("|");
+                } else {
+                    firstCurve = false;
+                }
+
+                names.append("[");
+                String[] commonNames = namedCurve.getNameAndAliases();
+                for (String commonName : commonNames) {
+                    names.append(commonName);
+                    names.append(",");
+                }
+
+                names.append(namedCurve.getObjectId());
+                names.append("]");
             }
 
-            names.append(namedCurve.getObjectId());
-            names.append("]");
+            HashMap<String, String> apAttrs = new HashMap<>(ATTRS);
+            apAttrs.put("SupportedCurves", names.toString());
+
+            putService(new ProviderServiceA(this, "AlgorithmParameters",
+                "EC", "sun.security.util.ECParameters", apAttrs));
+
+            putXDHEntries();
+            putEdDSAEntries();
+
+            /*
+             * Signature engines
+             */
+            putService(new ProviderService(this, "Signature",
+                "NONEwithECDSA", "sun.security.ec.ECDSASignature$Raw",
+                null, ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA1withECDSA", "sun.security.ec.ECDSASignature$SHA1",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA224withECDSA", "sun.security.ec.ECDSASignature$SHA224",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA256withECDSA", "sun.security.ec.ECDSASignature$SHA256",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA384withECDSA", "sun.security.ec.ECDSASignature$SHA384",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA512withECDSA", "sun.security.ec.ECDSASignature$SHA512",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA3-224withECDSA", "sun.security.ec.ECDSASignature$SHA3_224",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA3-256withECDSA", "sun.security.ec.ECDSASignature$SHA3_256",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA3-384withECDSA", "sun.security.ec.ECDSASignature$SHA3_384",
+                ATTRS));
+            putService(new ProviderServiceA(this, "Signature",
+                "SHA3-512withECDSA", "sun.security.ec.ECDSASignature$SHA3_512",
+                ATTRS));
+
+            putService(new ProviderService(this, "Signature",
+                 "NONEwithECDSAinP1363Format",
+                 "sun.security.ec.ECDSASignature$RawinP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                 "SHA1withECDSAinP1363Format",
+                 "sun.security.ec.ECDSASignature$SHA1inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                 "SHA224withECDSAinP1363Format",
+                 "sun.security.ec.ECDSASignature$SHA224inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                 "SHA256withECDSAinP1363Format",
+                 "sun.security.ec.ECDSASignature$SHA256inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                "SHA384withECDSAinP1363Format",
+                "sun.security.ec.ECDSASignature$SHA384inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                "SHA512withECDSAinP1363Format",
+                "sun.security.ec.ECDSASignature$SHA512inP1363Format"));
+
+            putService(new ProviderService(this, "Signature",
+                 "SHA3-224withECDSAinP1363Format",
+                 "sun.security.ec.ECDSASignature$SHA3_224inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                 "SHA3-256withECDSAinP1363Format",
+                 "sun.security.ec.ECDSASignature$SHA3_256inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                "SHA3-384withECDSAinP1363Format",
+                "sun.security.ec.ECDSASignature$SHA3_384inP1363Format"));
+            putService(new ProviderService(this, "Signature",
+                "SHA3-512withECDSAinP1363Format",
+                "sun.security.ec.ECDSASignature$SHA3_512inP1363Format"));
+
+            /*
+             *  Key Pair Generator engine
+             */
+            putService(new ProviderService(this, "KeyPairGenerator",
+                "EC", "sun.security.ec.ECKeyPairGenerator",
+                List.of("EllipticCurve"), ATTRS));
+
+            /*
+             * Key Agreement engine
+             */
+            putService(new ProviderService(this, "KeyAgreement",
+                "ECDH", "sun.security.ec.ECDHKeyAgreement", null, ATTRS));
         }
-
-        HashMap<String, String> apAttrs = new HashMap<>(ATTRS);
-        apAttrs.put("SupportedCurves", names.toString());
-
-        putService(new ProviderServiceA(this, "AlgorithmParameters",
-            "EC", "sun.security.util.ECParameters", apAttrs));
-
-        putXDHEntries();
-        putEdDSAEntries();
-
-        /*
-         * Signature engines
-         */
-        putService(new ProviderService(this, "Signature",
-            "NONEwithECDSA", "sun.security.ec.ECDSASignature$Raw",
-            null, ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA1withECDSA", "sun.security.ec.ECDSASignature$SHA1",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA224withECDSA", "sun.security.ec.ECDSASignature$SHA224",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA256withECDSA", "sun.security.ec.ECDSASignature$SHA256",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA384withECDSA", "sun.security.ec.ECDSASignature$SHA384",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA512withECDSA", "sun.security.ec.ECDSASignature$SHA512",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA3-224withECDSA", "sun.security.ec.ECDSASignature$SHA3_224",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA3-256withECDSA", "sun.security.ec.ECDSASignature$SHA3_256",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA3-384withECDSA", "sun.security.ec.ECDSASignature$SHA3_384",
-            ATTRS));
-        putService(new ProviderServiceA(this, "Signature",
-            "SHA3-512withECDSA", "sun.security.ec.ECDSASignature$SHA3_512",
-            ATTRS));
-
-        putService(new ProviderService(this, "Signature",
-             "NONEwithECDSAinP1363Format",
-             "sun.security.ec.ECDSASignature$RawinP1363Format"));
-        putService(new ProviderService(this, "Signature",
-             "SHA1withECDSAinP1363Format",
-             "sun.security.ec.ECDSASignature$SHA1inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-             "SHA224withECDSAinP1363Format",
-             "sun.security.ec.ECDSASignature$SHA224inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-             "SHA256withECDSAinP1363Format",
-             "sun.security.ec.ECDSASignature$SHA256inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-            "SHA384withECDSAinP1363Format",
-            "sun.security.ec.ECDSASignature$SHA384inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-            "SHA512withECDSAinP1363Format",
-            "sun.security.ec.ECDSASignature$SHA512inP1363Format"));
-
-        putService(new ProviderService(this, "Signature",
-             "SHA3-224withECDSAinP1363Format",
-             "sun.security.ec.ECDSASignature$SHA3_224inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-             "SHA3-256withECDSAinP1363Format",
-             "sun.security.ec.ECDSASignature$SHA3_256inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-            "SHA3-384withECDSAinP1363Format",
-            "sun.security.ec.ECDSASignature$SHA3_384inP1363Format"));
-        putService(new ProviderService(this, "Signature",
-            "SHA3-512withECDSAinP1363Format",
-            "sun.security.ec.ECDSASignature$SHA3_512inP1363Format"));
-
-        /*
-         *  Key Pair Generator engine
-         */
-        putService(new ProviderService(this, "KeyPairGenerator",
-            "EC", "sun.security.ec.ECKeyPairGenerator",
-            List.of("EllipticCurve"), ATTRS));
-
-        /*
-         * Key Agreement engine
-         */
-        putService(new ProviderService(this, "KeyAgreement",
-            "ECDH", "sun.security.ec.ECDHKeyAgreement", null, ATTRS));
     }
 
     private void putXDHEntries() {

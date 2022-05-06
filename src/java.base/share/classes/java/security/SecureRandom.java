@@ -22,6 +22,11 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+/*
+ * ===========================================================================
+ * (c) Copyright IBM Corp. 2022, 2022 All Rights Reserved
+ * ===========================================================================
+ */
 
 package java.security;
 
@@ -30,6 +35,7 @@ import java.util.*;
 import java.util.random.RandomGenerator;
 import java.util.regex.*;
 import java.security.Provider.Service;
+import java.security.FIPSConfigurator;
 
 import jdk.internal.util.random.RandomSupport.RandomGeneratorProperties;
 import sun.security.jca.*;
@@ -160,6 +166,8 @@ public class SecureRandom extends java.util.Random {
     private static final boolean skipDebug =
         Debug.isOn("engine=") && !Debug.isOn("securerandom");
 
+    private static boolean isFips = FIPSConfigurator.enableFips();
+
     /**
      * The provider.
      *
@@ -267,24 +275,33 @@ public class SecureRandom extends java.util.Random {
     private void getDefaultPRNG(boolean setSeed, byte[] seed) {
         Service prngService = null;
         String prngAlgorithm = null;
-        for (Provider p : Providers.getProviderList().providers()) {
-            // SUN provider uses the SunEntries.DEF_SECURE_RANDOM_ALGO
-            // as the default SecureRandom algorithm; for other providers,
-            // Provider.getDefaultSecureRandom() will use the 1st
-            // registered SecureRandom algorithm
-            if (p.getName().equals("SUN")) {
-                prngAlgorithm = SunEntries.DEF_SECURE_RANDOM_ALGO;
-                prngService = p.getService("SecureRandom", prngAlgorithm);
-                break;
-            } else {
-                prngService = p.getDefaultSecureRandomService();
-                if (prngService != null) {
-                    prngAlgorithm = prngService.getAlgorithm();
+        
+	// If in FIPS mode, use the SecureRandom from the FIPS provider
+        if (isFips) {
+            Provider p = Security.getProvider("SunPKCS11-NSS-FIPS");
+            prngAlgorithm = "PKCS11";
+            prngService = p.getService("SecureRandom", prngAlgorithm);
+        } else {
+            for (Provider p : Providers.getProviderList().providers()) {
+                // SUN provider uses the SunEntries.DEF_SECURE_RANDOM_ALGO
+                // as the default SecureRandom algorithm; for other providers,
+                // Provider.getDefaultSecureRandom() will use the 1st
+                // registered SecureRandom algorithm
+                if (p.getName().equals("SUN")) {
+                    prngAlgorithm = SunEntries.DEF_SECURE_RANDOM_ALGO;
+                    prngService = p.getService("SecureRandom", prngAlgorithm);
                     break;
+                } else {
+                    prngService = p.getDefaultSecureRandomService();
+                    if (prngService != null) {
+                        prngAlgorithm = prngService.getAlgorithm();
+                        break;
+                    }
                 }
             }
         }
-        // per javadoc, if none of the Providers support a RNG algorithm,
+	
+	// per javadoc, if none of the Providers support a RNG algorithm,
         // then an implementation-specific default is returned.
         if (prngService == null) {
             prngAlgorithm = "SHA1PRNG";

@@ -22,6 +22,11 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+/*
+ * ===========================================================================
+ * (c) Copyright IBM Corp. 2022, 2022 All Rights Reserved
+ * ===========================================================================
+ */
 
 package java.security;
 
@@ -29,6 +34,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.io.*;
 import java.net.URL;
+import java.security.FIPSConfigurator;
 
 import jdk.internal.event.EventHelper;
 import jdk.internal.event.SecurityPropertyModificationEvent;
@@ -193,6 +199,17 @@ public final class Security {
             }
         }
 
+	// Load FIPS properties
+        if (loadedProps) {
+            boolean fipsEnabled = FIPSConfigurator.configureFIPS(props);
+            if (sdebug != null) {
+                if (fipsEnabled) {
+                    sdebug.println("FIPS mode enabled.");
+                } else {
+                    sdebug.println("FIPS mode disabled.");
+                }
+            }
+        }
     }
 
     /*
